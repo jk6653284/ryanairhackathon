@@ -1,0 +1,398 @@
+---
+title: "Ryanair Hackathon"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##api tries
+
+```{r}
+library(httr)
+library(jsonlite)
+library(magrittr)
+library(tidyverse)
+library(gridExtra)
+library(readr)
+library(weatherr)
+library(lubridate)
+library(reshape2)
+library(zoo)
+library(forecast)
+library(fBasics)
+library(forecast)
+library(fUnitRoots)
+library(car)
+library(MASS)
+library(ggfortify)
+
+getwd()
+setwd("~/IE-BIGDATA/Hackathons/Ryanair hackathon")
+```
+
+```{r}
+weather <- read_csv("weather_madrid_LEMD_1997_2015.csv")
+
+weather2$CET <- as.Date(weather2$CET)
+
+
+weather2 <- weather %>%
+  select(CET, `Max Gust SpeedKm/h`, CloudCover) %>%
+  rename(Gusts = `Max Gust SpeedKm/h`) 
+
+weather3 <- weather2[weather2$CET > "2011-12-31", ]
+
+weather3[is.na(weather3)] <- 0
+
+weather4 <- weather3 %>%
+  mutate(year = format(weather3$CET, format="%Y")) %>%
+  mutate(month = format(weather3$CET, format="%m")) %>%
+  mutate(day = format(weather3$CET, format="%d"))
+
+weather4$year <- as.numeric(weather4$year)
+weather4$month <- as.numeric(weather4$month)
+weather4$day <- as.numeric(weather4$day)
+
+weather_averages <- weather4 %>%
+  group_by(month, day) %>%
+  summarise(gusts_5y = mean(Gusts), cloud_5y = mean(CloudCover))
+
+weatherf <- weather_averages %>%
+  select(-cloud_5y)
+
+weatherf <- weatherf %>%
+  mutate(penalty = ifelse(gusts_5y < 30, 0,
+                          ifelse(gusts_5y >= 30 & gusts_5y < 41, 1, 
+                          ifelse(gusts_5y >= 41 & gusts_5y < 51, 2, 3)
+                          )))
+
+
+weatherf$date <- paste(month.abb[weatherf$month], weatherf$day, sep="-")
+weatherf$date <- as.Date(weatherf$date, format="%b-%d")
+
+w <- weatherf %>%
+  ungroup() %>%
+  select(date, penalty)
+
+w$penalty <- as.factor(w$penalty)
+
+w1 <- model.matrix(~penalty-1,  w)
+
+w2 <- cbind(w, w1)
+
+w2 <- w2 %>%
+  select(-penalty) 
+
+w2 <- drop_na(w2)
+
+w2$penalty0 <- as.integer(w2$penalty0)
+w2$penalty1 <- as.integer(w2$penalty1)
+w2$penalty2 <- as.integer(w2$penalty2)
+w2$penalty3 <- as.integer(w2$penalty3)
+
+w3 <- w2 %>%
+  select(date)
+
+w4 <- w2 %>%
+  select(-date)
+
+#to factor
+
+cols2 <- c("penalty0", "penalty1", "penalty2", "penalty3")
+
+w2[cols2] <- lapply(w2[cols2], factor)
+
+
+wts <- zoo(w2, order.by=w2$date)
+
+autoplot(wts)
+
+ggplot(data=weatherf) +
+  geom_histogram(aes(x=gusts_5y), binwidth=1, col=I('gray'))
+
+
+#subslection 
+janw <- window(wts, start="2018-01-20", end="2018-10-27")
+```
+
+
+```{r}
+#jan testdata
+
+jan <- read.csv("schedules_jan.csv", sep='\t')
+feb <- read.csv("schedules_feb.csv", sep='\t')
+mar <- read.csv("schedules_mar.csv", sep='\t')
+apr <- read.csv("schedules_apr.csv", sep='\t')
+may <- read.csv("schedules_may.csv", sep='\t')
+june <- read.csv("schedules_jun.csv", sep='\t')
+july <- read.csv("schedules_jul.csv", sep='\t')
+aug <- read.csv("schedules_aug.csv", sep='\t')
+sep <- read.csv("schedules_sep.csv", sep='\t')
+oct <- read.csv("schedules_oct.csv", sep='\t')
+
+year <- rbind(jan, feb, mar, apr, may, june, july, aug, sep, oct)
+
+year <- year %>%
+  mutate(date = paste(year, month, day_date, sep="-"))
+    
+year$date <- as.Date(year$date)
+
+j0 <- year %>% 
+  group_by(date) %>%
+  summarise(freq = n())
+
+j0 <- j0 %>%
+  mutate(month1 = month(date))
+
+j0$month1 <- as.factor(j0$month1)
+
+j1 <- model.matrix(~month1-1, j0)
+
+j5 <- cbind(j1, j0) %>%
+  select(-month1)
+
+j3 <- j0 %>%
+  select(date)
+
+j2 <- j5 %>%
+  select(-date)
+
+j4 <- zoo(j5, order.by=j3$date)
+
+
+
+#coerce to factor
+cols1 <- c("month11", "month12", "month13", "month14", "month15", "month16", "month17", "month18", "month19", "month110", "freq_dummy")
+
+j2_stat[cols1] <- lapply(j2_stat[cols1], factor)
+
+
+
+#concatenate
+ts1 <- ts(j2_stat, start=decimal_date(ymd("2018-01-20")), frequency=281/7)
+
+flights <- cbind(ts1, janw)
+
+flights2 <- ts(flights, start=decimal_date(ymd("2018-01-20")), frequency=281/7)
+
+ts1 <- zooreg(flights)
+
+flights2$date <- as.Date(flights2$date, format = '%Y-%m-%d')
+
+?as.Date
+
+flights2 <- ts(flights2, start=decimal_date(ymd("2018-01-20")), frequency=281/7)
+
+
+#factors
+
+
+#transform for stationarity
+
+temp_j5 <- j5[j5$freq < 2000,]
+temp_j5_2 <- j5[j5$freq >= 2000,]
+
+mean(temp_j5$freq) - mean(temp_j5_2$freq) #589.5345
+  
+
+j5_stat <- j5 %>%
+  mutate(freq_trans = ifelse(j5$freq < 2000, j5$freq + 589.5345, j5$freq)) %>%
+  mutate(freq_dummy = ifelse(j5$freq < 2000, 0, 1))
+
+j2_stat <- j5_stat
+
+ts1 <- ts(j2_stat, start=c(2018, 20), frequency=7)
+
+j4_stat <- zoo(j2_stat, order.by=j3$date)
+
+#box cox transform
+lambda <- BoxCox.lambda(j2_stat$freq_trans)
+
+j2_stat$freq_box <- BoxCox(j2_stat$freq_trans, lambda)
+```
+
+vis
+```{r}
+ggplot(data=j5_stat) +
+  geom_col(aes(x=date, y=freq_trans), col=I('gray'))
+
+
+```
+
+
+
+
+stationarity checks
+```{r}
+s <- freq_old
+
+ggtsdisplay(s)
+
+#autocorrelation function and partial autocorrelation function -- ggplot version
+p3 <- autoplot(s)
+p1 <- ggAcf(s, lag.max=30)
+p2 <- ggPacf(s)
+grid.arrange(p3, p1, p2)
+
+#box test
+Box.test(s, lag=20, type='Ljung')
+
+#normality
+s <- s$freq_box
+
+mean_s <- mean(s)
+sd_s <- sd(s)
+
+histplot <- ggplot(data=s) +
+  geom_histogram(aes(x=s, y=..density..), col=I('gray'), bins=20) +
+  stat_function(fun=dnorm, args=list(mean=mean_s, sd=sd_s), col='red', size=1.5)
+
+qqplot <- ggplot(data=s) +
+  stat_qq(aes(sample=scale(s))) +
+  geom_abline(slope=1, intercept=0, col='red', size=1.5)
+
+grid.arrange(histplot, qqplot, nrow=1)
+
+#ts autoplots
+autoplot(flights)
+
+```
+
+##Removing seasonality
+```{r}
+freq_trans <- ts(j2_stat$freq_trans, start=decimal_date(ymd("2018-01-20")), frequency=7)
+
+freq_trans <- diff(diff(freq_trans, 7),1)
+
+#---
+  
+freq_old <- ts(j2_stat$freq, start=decimal_date(ymd("2018-01-20")), frequency=281/7)
+
+freq_old <- freq_old %>% diff(lag=7) %>% diff(lag=1)
+
+#---
+
+
+final_freq <- ts(j2_stat$freq, start=2018, frequency=7)
+
+final_freq <- diff(diff(final_freq, 7),1)
+
+#--
+
+ggtsdisplay(final_freq, lag.max=30)
+ggAcf(final_freq, lag.max=30)
+```
+
+
+
+
+auto-arima
+```{r}
+freq_box <- ts(j2_stat$freq_box, start=decimal_date(ymd("2018-01-20")), frequency=7)
+
+#xreg
+xreg <- cbind(wpenalty=model.matrix(~as.factor(w$penalty[1:281])),
+              freq_dummy=j5_stat$freq_dummy, 
+              month=model.matrix(~as.factor(j0$month1)))
+
+xreg2 <- xreg[1:273,]
+xreg3 <- xreg2[,c(-1, -6)]
+
+#alt-xreg
+xreg_alt <- cbind(gusts=weatherf$gusts_5y[20:300],
+                  gusts_sq=weatherf$gusts_5y[20:300]^2,
+                  month=model.matrix(~as.factor(j0$month1)),
+                  freq_dummy=j5_stat$freq_dummy)
+xreg_alt2 <- xreg_alt[,-3]
+xreg_alt3 <- xreg_alt2[1:281,]
+
+#arimax
+fit <- auto.arima(freq_trans, xreg=xreg_alt3, stepwise=F, approximation = F)
+
+
+#non-diff fit
+fit3 <- auto.arima(freq_trans, xreg=xreg_alt3, stepwise=F, approximation = F, D=1, d=1)
+
+autoplot(residuals(fit3, type="innovation"))
+checkresiduals(fit3)
+tsdisplay(residuals(fit3), lag.max=15, main='Seasonal Model Residuals')
+
+#post
+autoplot(residuals(fit, type="innovation"))
+checkresiduals(fit)
+tsdisplay(residuals(fit), lag.max=15, main='Seasonal Model Residuals')
+
+#overlay
+autoplot(freq_trans, series="Data", ts.colour='blue', ts.size=1, label = "d") +
+  forecast::autolayer(fitted(fit3), series="Fitted", size=1) +
+  ylab("") +
+  ggtitle("Flight frequency in Europe") +
+  guides(colour=guide_legend(title=" ")) +
+  scale_x_continuous(breaks=seq(2018.05205479452, 2058.05205479452, 10), labels = xlabs) +
+  xlab("2018")
+
+```
+
+Manual arima
+```{r}
+xreg_alt4 <- xreg_alt2[1:273]
+
+fit2 <- auto.arima(final_freq, xreg=xreg_alt3, stepwise=F, approximation = F)
+
+#post
+autoplot(residuals(fit2, type="innovation"))
+checkresiduals(fit2)
+tsdisplay(residuals(fit2), lag.max=15, main='Seasonal Model Residuals')
+
+#overlay
+autoplot(final_freq, series="Data") +
+  forecast::autolayer(fitted(fit2), series="Fitted") +
+  ylab("") +
+  ggtitle("Daily Flights in Europe") +
+  guides(colour= guide_legend(title=" "))
+
+```
+
+
+##forecast
+```{r}
+#future exogenous var input
+weather_future <- weather4[302:315,]
+month_future <- factor(replicate(14, 10), levels=c(1,2,3,4,5,6,7,8,9,10))
+freq_dummy_future <- replicate(14, 1)
+
+xreg_future <- cbind(gusts=weather_future$Gusts,
+                  gusts_sq=weather_future$Gusts^2,
+                  month=model.matrix(~as.factor(month_future)),
+                  freq_dummy=freq_dummy_future)
+xreg_future2 <- xreg_future[,-3]
+
+#forecast
+fcast <- forecast(fit3, xreg=xreg_future2)
+
+xlabs <- c("January", "March", "May",  "July",  "September")
+
+xlabs2 <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+
+xseq<-seq.Date(as.Date("2018-01-20"),as.Date("2018-10-31"), by='1 day')
+
+
+finalplot <- autoplot(fcast, ts.colour='red', ts.size=0.5) +
+  ggtitle("Two week flight density forecast") +
+  scale_x_continuous(breaks=seq(2018.05205479452, 2058.05205479452, 10), labels = xlabs) +
+  xlab("2018")
+
+finalplot2 <- finalplot <- autoplot(fcast, ts.colour='red', ts.size=0.5) +
+  ggtitle("Two week flight density forecast") +
+  scale_x_continuous(breaks=seq(2018.05205479452, 2058.05205479452, 10), labels = xlabs) +
+  xlab("2018") +
+  coord_cartesian(xlim = c(2048, 2060))
+
+```
+
+```{r}
+autoplot(freq_old)
+```
+
